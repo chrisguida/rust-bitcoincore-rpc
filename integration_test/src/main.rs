@@ -131,6 +131,10 @@ fn new_wallet_client(wallet_name: &str) -> Client {
     Client::new(&url, get_auth()).unwrap()
 }
 
+const TEST_DESCRIPTOR_SINGLE: &str = "pkh(02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c)#62k9sn4x";
+const TEST_DESCRIPTOR_RANGE: &str = "wpkh([1004658e/84'/1'/0']tpubDCBEcmVKbfC9KfdydyLbJ2gfNL88grZu1XcWSW9ytTM6fitvaRmVyr8Ddf7SjZ2ZfMx9RicjYAXhuh3fmLiVLPodPEqnQQURUfrBKiiVZc8/0/*)#g8l47ngv";
+const TEST_DESCRIPTOR_RANGE_ADDR0: &str = "bcrt1q5n5tjkpva8v5s0uadu2y5f0g7pn4h5eqaq2ux2";
+
 fn main() {
     log::set_logger(&LOGGER).map(|()| log::set_max_level(log::LevelFilter::max())).unwrap();
 
@@ -191,6 +195,7 @@ fn main() {
     test_finalize_psbt(&cl);
     test_list_received_by_address(&cl);
     test_scantxoutset(&cl);
+    test_scanblocks(&cl);
     test_import_public_key(&cl);
     test_import_priv_key(&cl);
     test_import_address(&cl);
@@ -1261,6 +1266,51 @@ fn test_scantxoutset(cl: &Client) {
 
     assert_eq!(utxos.unspents.len(), 2);
     assert_eq!(utxos.success, Some(true));
+}
+
+fn test_scanblocks(cl: &Client) {
+    use json::ScanBlocksRequestDescriptor;
+    use json::ScanBlocksRequest;
+    use json::ScanBlocksOptions;
+    
+    // result is ok, and returns no relevant blocks for unused descriptor
+    let desc = TEST_DESCRIPTOR_SINGLE.to_string();
+    let scanobjects = &[ScanBlocksRequestDescriptor::Single(desc)];
+    let filtertype = Some(String::from("basic"));
+    let options = Some(ScanBlocksOptions {
+        filter_false_positives: Some(true),
+    });
+    let req = ScanBlocksRequest {
+        scanobjects,
+        start_height: None,
+        stop_height: None,
+        filtertype: filtertype.clone(),
+        options: options.clone(),
+    };
+    let res = cl.scan_blocks_blocking(req);
+    assert!(res.is_ok());
+    assert!(res.unwrap().relevant_blocks.is_empty());
+    
+    // finds relevant blocks
+    let start_height = Some(cl.get_block_count().unwrap());
+    let desc = TEST_DESCRIPTOR_RANGE.to_string();
+    let addr = Address::from_str(TEST_DESCRIPTOR_RANGE_ADDR0).unwrap().assume_checked();
+    let _ = cl.generate_to_address(1, &addr).unwrap();
+    let scanobjects = &[
+        ScanBlocksRequestDescriptor::Extended { 
+            desc,
+            range: Some((0, 1))
+        }
+    ];
+    let req = ScanBlocksRequest {
+        scanobjects,
+        start_height,
+        stop_height: None,
+        filtertype,
+        options,
+    };
+    let res = cl.scan_blocks_blocking(req).unwrap();
+    assert!(!res.relevant_blocks.is_empty());
 }
 
 fn test_getblocktemplate(cl: &Client) {
